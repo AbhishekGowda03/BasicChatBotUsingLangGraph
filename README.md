@@ -14,11 +14,21 @@ is an exploratory Jupyter notebook rather than a production application.
 - Routing tool calls through LangGraph's `ToolNode`
 - Searching the web with Tavily
 - Calling a local `multiply` tool
+- Pausing execution for human assistance with LangGraph interrupts
+- Resuming a paused conversation with checkpointed state
 
 The tool-enabled flow is:
 
 ```text
 User message -> LLM -> tool call -> ToolNode -> LLM -> final response
+```
+
+The human-in-the-loop flow in `two.ipynb` is:
+
+```text
+User message -> LLM -> human_assistance -> interrupt
+									  |
+						  Command(resume=...) -> LLM -> final response
 ```
 
 ## Requirements
@@ -52,14 +62,22 @@ TAVILY_API_KEY=your-tavily-api-key
 
 Do not commit `.env` or expose either key in notebook output.
 
-## Run The Notebook
+## Run The Notebooks
 
-Open [basicchatbot/one.ipynb](basicchatbot/one.ipynb) in VS Code or Jupyter and
-run the cells from top to bottom. The notebook uses this Groq model:
+Open either notebook in VS Code or Jupyter and run its cells from top to bottom.
+Both notebooks use this model through the Groq provider:
 
 ```python
-qwen/qwen3.6-27b
+llm = init_chat_model(
+	"qwen/qwen3.6-27b",
+	model_provider="groq",
+)
 ```
+
+### Basic Chatbot
+
+[basicchatbot/one.ipynb](basicchatbot/one.ipynb) demonstrates basic graph
+construction, streaming, Tavily web search, and tool routing.
 
 Example tool-enabled input:
 
@@ -70,6 +88,34 @@ graph.invoke({"messages": "what happened in Bangalore today?"})
 For a web-search request, the LLM should produce a Tavily tool call. The graph
 then executes Tavily and sends its result back to the LLM for a natural-language
 answer.
+
+### Human In The Loop
+
+[basicchatbot/two.ipynb](basicchatbot/two.ipynb) adds a `human_assistance` tool.
+When the model calls this tool, `interrupt(...)` pauses execution and the graph
+stores its state with `MemorySaver`:
+
+```python
+memory = MemorySaver()
+graph = graph_builder.compile(checkpointer=memory)
+```
+
+Use a stable `thread_id` when starting the conversation:
+
+```python
+config = {"configurable": {"thread_id": "12345"}}
+```
+
+After the graph pauses, resume it with a human response using the same config:
+
+```python
+human_response = "Please provide more details about your implementation."
+human_command = Command(resume={"data": human_response})
+graph.stream(human_command, config=config, stream_mode="values")
+```
+
+The notebook currently uses a fixed sample response. It does not yet collect
+the human response through an interactive prompt or external operator UI.
 
 ## Package Command
 
@@ -87,7 +133,8 @@ currently in the notebook and is not wired into the package entry point.
 ```text
 .
 ├── basicchatbot/
-│   └── one.ipynb                         # LangGraph tutorial notebook
+│   ├── one.ipynb                          # Basic chatbot and tool routing
+│   └── two.ipynb                          # Human-in-the-loop chatbot
 ├── src/
 │   └── basicchatbotusinglanggraph/
 │       └── __init__.py                   # Current package entry point
